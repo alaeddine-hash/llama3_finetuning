@@ -207,10 +207,50 @@ trainer = SFTTrainer(
         seed = 3407,
         output_dir = "outputs",
     ),
-)#@title Show current memory stats
+)
+
+
+#@title Show current memory stats
 gpu_stats = torch.cuda.get_device_properties(0)
 start_gpu_memory = round(torch.cuda.max_memory_reserved() / 1024 / 1024 / 1024, 3)
 max_memory = round(gpu_stats.total_memory / 1024 / 1024 / 1024, 3)
 print(f"GPU = {gpu_stats.name}. Max memory = {max_memory} GB.")
 print(f"{start_gpu_memory} GB of memory reserved.")
+
+
+# Train the model
 trainer_stats = trainer.train()
+
+model.save_pretrained("/mnt/data/alaeddine_lora_model") # Local saving
+tokenizer.save_pretrained("/mnt/data/alaeddine_lora_model")
+# model.push_to_hub("your_name/lora_model", token = "...") # Online saving
+# tokenizer.push_to_hub("your_name/lora_model", token = "...") # Online saving
+
+if True:  # Adjust the condition based on your use case
+    from unsloth import FastLanguageModel
+    model, tokenizer = FastLanguageModel.from_pretrained(
+        model_name="/mnt/data/alaeddine_lora_model",  # Adjust the model name as required
+        max_seq_length=2048,
+        dtype=None,
+        load_in_4bit=True,
+    )
+    FastLanguageModel.for_inference(model)
+
+# Define the prompt format clearly
+alpaca_prompt = "What is a famous tall tower in Paris?"
+
+# Preparing the input for the model
+inputs = tokenizer(
+    [
+        alpaca_prompt.format(
+            "What is a famous tall tower in Paris?", # instruction
+            "", # input
+            "", # output - leave this blank for generation!
+        )
+    ], return_tensors="pt").to("cuda")
+
+# Generating output from the model
+outputs = model.generate(**inputs, max_new_tokens=64, use_cache=True)
+result = tokenizer.batch_decode(outputs)
+
+print(result)  # Print the output from the model
