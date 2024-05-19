@@ -30,15 +30,17 @@ EOS_TOKEN = tokenizer.eos_token
 from unsloth import FastLanguageModel
 import torch
 
+# Define the model parameters	
 max_seq_length = 2048 # Choose any! We auto support RoPE Scaling internally!
 dtype = None # None for auto detection. Float16 for Tesla T4, V100, Bfloat16 for Ampere+
 load_in_4bit = True # Use 4bit quantization to reduce memory usage. Can be False.
 
-  # 4bit pre quantized models we support for 4x faster downloading + no OOMs.
+# 4bit pre quantized models we support for 4x faster downloading + no OOMs.
 fourbit_models = [
       "unsloth/llama-3-8b-bnb-4bit", # [NEW] 15 Trillion token Llama-3
-  ] # More models at https://huggingface.co/unsloth
-
+  ] 
+# More models at https://huggingface.co/unsloth
+# Load the model
 model, tokenizer = FastLanguageModel.from_pretrained(
       model_name = "unsloth/llama-3-8b-bnb-4bit",
       max_seq_length = max_seq_length,
@@ -46,6 +48,7 @@ model, tokenizer = FastLanguageModel.from_pretrained(
       load_in_4bit = load_in_4bit,
       # token = "hf_...", # use one if using gated models like meta-llama/Llama-2-7b-hf
   )
+# Define EOS_TOKEN immediately after loading the tokenizer
 model = FastLanguageModel.get_peft_model(
     model,
     r = 16, # Choose any number > 0 ! Suggested 8, 16, 32, 64, 128
@@ -67,9 +70,15 @@ files = {
     "system_configuration.csv": "/mnt/data/system_configuration.csv",
     "vulnerability_analysis.csv": "/mnt/data/vulnerability_analysis.csv"
 }
+
+# Load the data from the CSV files
 dfs = {name: pd.read_csv(path) for name, path in files.items()}
+
+# Merge the dataframes based on the common columns
 merged_cve_vuln = pd.merge(dfs['cve.csv'], dfs['vulnerability_analysis.csv'], left_on='cve_id', right_on='id_cve', how='left')
+# Merge the dataframes based on the common columns
 merged_cve_vuln_sys = pd.merge(merged_cve_vuln, dfs['system_configuration.csv'], left_on='system_configuration_id', right_on='id', how='left', suffixes=('_vuln', '_sys'))
+# Merge the dataframes based on the common columns
 final_merge = pd.merge(
     merged_cve_vuln_sys,
     dfs['analysis_cverecommendation.csv'],
@@ -78,10 +87,14 @@ final_merge = pd.merge(
     how='left',
     suffixes=('_merged', '_rec')
 )
+
+# Select relevant columns for the final dataset
 final_data = final_merge[[
     'cve_id', 'summary', 'vulnerability_type', 'affected_components', 'impact_level',
     'description', 'system_info', 'recommendations', 'mitigation_measures'
 ]]
+
+# Rename columns for better readability
 final_data.rename(columns={
     'cve_id': 'CVE ID', 'summary': 'Summary', 'vulnerability_type': 'Vulnerability Type',
     'affected_components': 'Affected Components', 'impact_level': 'Impact Level',
@@ -91,6 +104,7 @@ final_data.rename(columns={
 def normalize_text(text):
     return re.sub(r"\s+", " ", re.sub(r"[^a-zA-Z0-9\s]", "", text.lower())).strip()
 
+# Define a function to format the prompts
 def formatting_prompts_func(row):
     text = f"""Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.
 
@@ -105,8 +119,17 @@ CVE ID: {row['CVE ID']} - Summary: {row['Summary']} - Vulnerability Type: {row['
 """ + EOS_TOKEN
     return normalize_text(text)
 
+# Apply the formatting function to the data
 final_data['formatted_text'] = final_data.apply(formatting_prompts_func, axis=1)
 final_data['input_ids'] = final_data['formatted_text'].apply(lambda x: tokenizer(x, padding='max_length', truncation=True, max_length=512)['input_ids'])
+
+# Save the new dataset to a CSV file
+final_data.to_csv('/mnt/data/processed_cve_data.csv', index=False)
+
+# Display the first few rows of the processed data to confirm
+print(final_data.head())
+
+# Define the prompt format clearly
 def formatting_prompts_func(row):
     """
     Formats the prompts and labels for a given row of data.
@@ -158,8 +181,11 @@ def formatting_prompts_func(row):
 # Apply this function to your DataFrame
 processed_data = [formatting_prompts_func(row) for index, row in final_data.iterrows()
 ] 
+
+
 from torch.utils.data import random_split
 
+# Define a custom dataset class
 class CustomDataset(Dataset):
     def __init__(self, data):
         self.data = data
@@ -184,6 +210,8 @@ train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
 from trl import SFTTrainer
 from transformers import TrainingArguments
 
+
+# Define the training arguments
 trainer = SFTTrainer(
     model = model,
     tokenizer = tokenizer,
@@ -221,11 +249,16 @@ print(f"{start_gpu_memory} GB of memory reserved.")
 # Train the model
 trainer_stats = trainer.train()
 
+
+
+# Save the model and tokenizer
 model.save_pretrained("/mnt/data/alaeddine_lora_model") # Local saving
 tokenizer.save_pretrained("/mnt/data/alaeddine_lora_model")
 # model.push_to_hub("your_name/lora_model", token = "...") # Online saving
 # tokenizer.push_to_hub("your_name/lora_model", token = "...") # Online saving
 
+
+# Load the model and tokenizer
 if True:  # Adjust the condition based on your use case
     from unsloth import FastLanguageModel
     model, tokenizer = FastLanguageModel.from_pretrained(
@@ -237,7 +270,7 @@ if True:  # Adjust the condition based on your use case
     FastLanguageModel.for_inference(model)
 
 # Define the prompt format clearly
-alpaca_prompt = "What is a famous tall tower in Paris?"
+alpaca_prompt = "What do you no obout cve id {0}?"
 
 # Preparing the input for the model
 inputs = tokenizer(
